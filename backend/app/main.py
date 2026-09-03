@@ -1,4 +1,8 @@
 
+from dotenv import load_dotenv
+
+load_dotenv()  # load .env before settings are constructed
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

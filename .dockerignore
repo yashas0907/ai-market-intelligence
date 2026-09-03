@@ -1,0 +1,13 @@
+**/__pycache__
+**/*.pyc
+.venv
+.env
+*.db
+ml/artifacts/*
+!ml/artifacts/.gitkeep
+frontend/node_modules
+frontend/dist
+.git
+.github
+*.md
+!README.md

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Legend, BarChart, Bar, CartesianGrid, ReferenceLine
@@ -35,6 +35,7 @@ export default function Dashboard() {
   const [watchMsg, setWatchMsg] = useState('')
   const [tab, setTab] = useState('overview')
   const pollRef = useRef(null)
+  const [searchParams] = useSearchParams()
 
   const one = (k, fn) => async (...a) => {
     setLoading(l => ({ ...l, [k]: true }))
@@ -70,6 +71,15 @@ export default function Dashboard() {
     if (m) setMarket(m)
   }
 
+  // deep-link support: /?s=SYMBOL (used by watchlist links)
+  useEffect(() => {
+    const s = searchParams.get('s')
+    if (s && /^[A-Za-z0-9.\-^]{1,12}$/.test(s)) {
+      selectSymbol(s.toUpperCase())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     if (!symbol) return
     one('market', getMarket)(symbol, range).then(m => m && setMarket(m))
@@ -80,7 +90,7 @@ export default function Dashboard() {
     one('technical', getTechnical)(symbol, range).then(t => t && setTechnical(t))
     one('fundamentals', getFundamentals)(symbol).then(f => f && setFundamentals(f))
     one('news', getNews)(symbol).then(n => n && setNews(n))
-  }, [symbol])
+  }, [symbol, range])
 
   const runResearch = async () => {
     setWatchMsg('')

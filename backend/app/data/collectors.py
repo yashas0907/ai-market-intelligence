@@ -143,10 +143,22 @@ async def resolve_company_profile(session, symbol: str) -> dict[str, Any]:
             exchanges = subs.get("exchanges") or []
             if exchanges:
                 profile["exchange"] = profile["exchange"] or exchanges[0]
-            profile["sic_sector"] = subs.get("sicSector")
-            profile["sic_industry"] = subs.get("sicIndustry")
-            profile["sector"] = subs.get("sicSector") or profile.get("sector")
-            profile["industry"] = subs.get("sicIndustry") or profile.get("industry")
+            # submissions API exposes `sicDescription` e.g. "Technology services, Prepackaged software"
+            # (comma form) or "Services—Prepackaged Software" (dash form)
+            sic_desc = subs.get("sicDescription") or ""
+            if sic_desc:
+                import re as _re
+
+                parts = [p.strip() for p in _re.split(r"[,—–-]", sic_desc) if p.strip()]
+                if len(parts) >= 2:
+                    profile["sector"] = parts[0]
+                    profile["industry"] = " ".join(parts[1:])
+                else:
+                    profile["industry"] = sic_desc
+                    profile["sector"] = None
+            profile["category"] = subs.get("category")
+            profile["fiscal_year_end"] = subs.get("fiscalYearEnd")
+            profile["description"] = subs.get("description")
             profile["sources"].append("SEC submissions API")
         except Exception as exc:
             logger.warning("collector.profile_sec_fail", symbol=symbol, error=str(exc)[:150])
