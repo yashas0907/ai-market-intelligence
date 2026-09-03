@@ -1,0 +1,17 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+pydantic-settings==2.13.0
+httpx==0.28.1
+SQLAlchemy==2.0.52
+aiosqlite==0.22.1
+structlog==26.1.0
+slowapi==0.1.10
+feedparser==6.0.14
+python-multipart==0.0.32
+numpy==2.5.2
+pandas==3.0.5
+scikit-learn==1.9.0
+pypdf==6.16.2
+python-dotenv==1.2.3
+tenacity==9.1.4
