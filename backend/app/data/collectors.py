@@ -113,6 +113,33 @@ async def search_companies(query: str, limit: int = 10) -> list[dict[str, Any]]:
     return yahoo_hits[:limit]
 
 
+# SEC SIC division ranges → human-readable sector names
+_SIC_DIVISIONS = [
+    (100, 999, "Agriculture & Mining"),
+    (1000, 1499, "Oil & Gas Extraction"),
+    (1500, 1799, "Construction"),
+    (2000, 3999, "Manufacturing"),
+    (4000, 4999, "Transportation & Utilities"),
+    (5000, 5199, "Wholesale Trade"),
+    (5200, 5999, "Retail Trade"),
+    (6000, 6799, "Finance & Insurance"),
+    (7000, 8999, "Services"),
+    (9100, 9729, "Public Administration"),
+    (9900, 9999, "Other"),
+]
+
+
+def _sic_division_to_sector(sic_code) -> str | None:
+    try:
+        code = int(sic_code)
+    except (TypeError, ValueError):
+        return None
+    for lo, hi, name in _SIC_DIVISIONS:
+        if lo <= code <= hi:
+            return name
+    return None
+
+
 async def resolve_company_profile(session, symbol: str) -> dict[str, Any]:
     """Resolve company profile: try Yahoo quote first, fallback to SEC ticker map + submissions."""
     s = get_settings()
@@ -143,19 +170,14 @@ async def resolve_company_profile(session, symbol: str) -> dict[str, Any]:
             exchanges = subs.get("exchanges") or []
             if exchanges:
                 profile["exchange"] = profile["exchange"] or exchanges[0]
-            # submissions API exposes `sicDescription` e.g. "Technology services, Prepackaged software"
-            # (comma form) or "Services—Prepackaged Software" (dash form)
+            # submissions API: `sic` (numeric code) + `sicDescription`
+            # ("Services-Prepackaged Software", "Semiconductors & Related Devices", ...)
+            # Map SIC division → sector for consistent UX; keep description as industry.
             sic_desc = subs.get("sicDescription") or ""
             if sic_desc:
-                import re as _re
-
-                parts = [p.strip() for p in _re.split(r"[,—–-]", sic_desc) if p.strip()]
-                if len(parts) >= 2:
-                    profile["sector"] = parts[0]
-                    profile["industry"] = " ".join(parts[1:])
-                else:
-                    profile["industry"] = sic_desc
-                    profile["sector"] = None
+                profile["industry"] = sic_desc
+                profile["sector"] = _sic_division_to_sector(subs.get("sic"))
+            profile["category"] = subs.get("category")
             profile["category"] = subs.get("category")
             profile["fiscal_year_end"] = subs.get("fiscalYearEnd")
             profile["description"] = subs.get("description")

@@ -50,6 +50,16 @@ app.include_router(documents.router, prefix=API, tags=["observability-documents"
 @app.on_event("startup")
 async def startup() -> None:
     await init_db()
+    # Warm the SEC ticker-map cache so the first user search is fast.
+    try:
+        from app.data.collectors import cached
+        from app.data.sources.clients import SecClient
+
+        s = get_settings()
+        await cached("sec:ticker_map", s.cache_company_ttl, SecClient().get_ticker_map)
+        logger.info("app.cache_warmed", entries="sec:ticker_map")
+    except Exception as exc:
+        logger.warning("app.cache_warm_failed", error=str(exc)[:150])
     logger.info("app.started", version=settings.app_version, environment=settings.environment, llm=settings.llm_provider)
 
 

@@ -71,9 +71,12 @@ class Orchestrator:
         progress_pct = 10
         await self._update_session(db_session_row, progress=progress_pct, stage="Data collection", stages=state.progress)
 
-        # Phase 1: run the 5 analysis agents with bounded concurrency.
-        # Each agent gets its OWN DB session: SQLite async connections cannot
-        # multiplex concurrent operations on a single session.
+        # Phase 1a: independent DATA agents (market, technical, fundamental, news) —
+        # concurrent, each with its own DB session (SQLite: no shared-session concurrency).
+        # RiskAgent runs AFTER (Phase 1b) because it reads the outputs of the others.
+        data_agents = [a for a in ALL_AGENTS if a.name != "risk"]
+        risk_agent = next(a for a in ALL_AGENTS if a.name == "risk")
+
         semaphore = asyncio.Semaphore(self.settings.research_concurrency)
 
         async def run_agent_with_sem(agent):
@@ -85,11 +88,14 @@ class Orchestrator:
                     return await agent.run(agent_ctx)
 
         state.record_stage("agents:analysis")
-        results = await asyncio.gather(*(run_agent_with_sem(a) for a in ALL_AGENTS), return_exceptions=True)
-        for agent, res in zip(ALL_AGENTS, results):
+        results = await asyncio.gather(*(run_agent_with_sem(a) for a in data_agents), return_exceptions=True)
+        for agent, res in zip(data_agents, results):
             if isinstance(res, Exception):
                 logger.error("workflow.agent_exception", agent=agent.name, error=str(res)[:200])
                 state.agent_results[agent.name] = {"status": "failed", "error": str(res)[:300]}
+
+        # Phase 1b: risk agent — sequential, sees completed data-agent state
+        await run_agent_with_sem(risk_agent)
         progress_pct = 55
         await self._update_session(db_session_row, progress=progress_pct, stage="Specialized agents", stages=state.progress)
 
