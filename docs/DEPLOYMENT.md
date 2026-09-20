@@ -14,7 +14,7 @@
 2. Render dashboard → **New → Blueprint** → select the repo (Render reads `render.yaml`).
 3. Set the `sync: false` env vars in the dashboard:
    - `LLM_PROVIDER=openai_compatible`
-   - `LLM_MODEL=llama-3.3-70b-versatile`
+   - `LLM_MODEL=openai/gpt-oss-120b`
    - `LLM_BASE_URL=https://api.groq.com/openai/v1`
    - `LLM_API_KEY=<your Groq key — dashboard only, never committed>`
    - `CORS_ORIGINS=["https://<your-frontend>.vercel.app"]`

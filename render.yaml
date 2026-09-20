@@ -15,7 +15,7 @@ services:
       - key: LLM_PROVIDER
         sync: false          # set in dashboard: openai_compatible
       - key: LLM_MODEL
-        sync: false          # e.g. llama-3.3-70b-versatile
+        sync: false          # e.g. openai/gpt-oss-120b
       - key: LLM_API_KEY
         sync: false          # paste Groq key in dashboard (never in repo)
       - key: LLM_BASE_URL
