@@ -14,7 +14,7 @@ def utcnow() -> datetime:
 _YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
 _RANGES = {
-    ("1mo", "1d"), ("3mo", "1d"), ("6mo", "1d"), ("1y", "1d"), ("2y", "1d"), ("5y", "1d"), ("max", "1d"),
+    ("1d", "1d"), ("5d", "1d"), ("1mo", "1d"), ("3mo", "1d"), ("6mo", "1d"), ("1y", "1d"), ("2y", "1d"), ("5y", "1d"), ("max", "1d"),
 }
 
 

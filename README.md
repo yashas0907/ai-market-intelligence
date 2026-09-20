@@ -1,6 +1,8 @@
 # AI Market Intelligence & Research Platform
 
-An evidence-backed market research platform: pick any publicly traded company and receive a structured intelligence report combining market data, SEC fundamentals, technical indicators, news sentiment, risk analysis, and AI synthesis — **with every claim traceable to its source**.
+An evidence-backed market research platform: pick any publicly traded company and receive a structured intelligence report combining live quotes, market data, SEC fundamentals, technical indicators, news sentiment, risk analysis, and AI synthesis — **with every claim traceable to its source**. Real-time research progress streams to the dashboard via Server-Sent Events.
+
+**By Yashas P Phatak.**
 
 > **Educational/research tool. NOT financial advice.** No buy/sell recommendations, no price predictions, no guaranteed outcomes. Every number comes from real data at its stated retrieval time; missing data is reported as unavailable, never invented.
 
@@ -84,12 +86,14 @@ Measured (5y daily): AAPL GBM test acc 0.405 (majority baseline 0.522 — report
 ```
 GET  /api/companies/search?q=          company search (SEC map + Yahoo fallback)
 GET  /api/company/{symbol}             profile (name, sector, CIK, sources)
+GET  /api/company/{symbol}/quote       live quote (60s cache; delayed ≤15 min — stamped)
 GET  /api/company/{symbol}/market      daily OHLCV + retrieval time
 GET  /api/company/{symbol}/fundamentals  SEC XBRL metrics + derived ratios
 GET  /api/company/{symbol}/news        articles + sentiment (metadata only)
 GET  /api/company/{symbol}/technical   indicators, signals, statistics, series
 POST /api/research?symbol=&depth=      start async research job (quick/standard/deep)
-GET  /api/research/{job_id}            live status → completed report
+GET  /api/research/{job_id}            status polling (fallback)
+GET  /api/research/{job_id}/stream     REAL-TIME progress via Server-Sent Events
 POST /api/compare                      A vs B (+C) side-by-side metrics
 GET  /api/watchlist  POST  DELETE      watchlist CRUD
 POST /api/documents/upload             RAG upload (.txt/.md/.pdf ≤10MB)
@@ -191,8 +195,7 @@ cd frontend
 npm install && npm run dev                         # http://localhost:5173
 
 # runs fully key-less with LLM_PROVIDER=heuristic (deterministic local synthesizer).
-# Optional real LLM:
-cp ../.env.example .env   # set LLM_PROVIDER / LLM_API_KEY / LLM_MODEL
+# Optional real LLM (free via Groq): see .env.example — set LLM_PROVIDER/LLM_API_KEY.
 ```
 
 ### Docker
@@ -200,6 +203,10 @@ cp ../.env.example .env   # set LLM_PROVIDER / LLM_API_KEY / LLM_MODEL
 ```bash
 docker compose up --build          # backend :8000, frontend :5173
 ```
+
+### Deploy (free tier)
+
+Render backend + Vercel frontend — full guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ### Verify
 

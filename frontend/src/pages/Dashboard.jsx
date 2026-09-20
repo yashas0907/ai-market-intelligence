@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   searchCompanies, getCompany, getMarket, getTechnical, getFundamentals,
-  getNews, startResearch, getResearch, addToWatchlist
+  getNews, startResearch, getResearch, addToWatchlist, getQuote, researchStreamUrl
 } from '../api.js'
 import {
   fmt, pct, timeAgo, utcStamp, SentimentBadge, SeverityBadge,
@@ -34,7 +34,10 @@ export default function Dashboard() {
   const [error, setError] = useState('')
   const [watchMsg, setWatchMsg] = useState('')
   const [tab, setTab] = useState('overview')
+  const [quote, setQuote] = useState(null)
   const pollRef = useRef(null)
+  const quoteRef = useRef(null)
+  const esRef = useRef(null)
   const [searchParams] = useSearchParams()
 
   const one = (k, fn) => async (...a) => {
@@ -71,6 +74,15 @@ export default function Dashboard() {
     if (m) setMarket(m)
   }
 
+  // live quote ticker: 60s auto-refresh while a symbol is selected (honestly labeled)
+  useEffect(() => {
+    if (!symbol) { setQuote(null); return }
+    const refresh = () => getQuote(symbol).then(q => q && setQuote(q)).catch(() => {})
+    refresh()
+    quoteRef.current = setInterval(refresh, 60000)
+    return () => clearInterval(quoteRef.current)
+  }, [symbol])
+
   // deep-link support: /?s=SYMBOL (used by watchlist links)
   useEffect(() => {
     const s = searchParams.get('s')
@@ -101,23 +113,50 @@ export default function Dashboard() {
       setTab('report')
       if (!r.deduplicated) {
         clearInterval(pollRef.current)
-        pollRef.current = setInterval(async () => {
-          const st = await getResearch(r.job_id).catch(() => null)
-          if (!st) return
-          setJobStatus(st)
-          if (st.status === 'completed') {
-            clearInterval(pollRef.current)
-            setReport(st.report)
-          } else if (st.status === 'failed') {
-            clearInterval(pollRef.current)
-            setError(`research failed: ${st.error || 'unknown'}`)
-          }
-        }, 1500)
+        try {
+          const es = new EventSource(researchStreamUrl(r.job_id))
+          esRef.current = es
+          es.addEventListener('progress', (ev) => {
+            const st = JSON.parse(ev.data)
+            setJobStatus(prev => ({ ...(prev || { job_id: r.job_id, symbol: r.symbol || symbol }), ...st }))
+          })
+          es.addEventListener('done', (ev) => {
+            const fin = JSON.parse(ev.data)
+            es.close(); esRef.current = null
+            if (fin.status === 'completed' && fin.report) {
+              setJobStatus(prev => ({ ...(prev || {}), status: 'completed', progress: 100 }))
+              setReport(fin.report)
+            } else {
+              setError(`research failed: ${fin.error || 'unknown'}`)
+            }
+          })
+          es.addEventListener('error', () => {
+            es.close(); esRef.current = null
+            fallbackPoll(r.job_id)
+          })
+        } catch {
+          fallbackPoll(r.job_id)
+        }
       }
     }
   }
 
-  useEffect(() => () => clearInterval(pollRef.current), [])
+  const fallbackPoll = (id) => {
+    pollRef.current = setInterval(async () => {
+      const st = await getResearch(id).catch(() => null)
+      if (!st) return
+      setJobStatus(st)
+      if (st.status === 'completed') {
+        clearInterval(pollRef.current)
+        setReport(st.report)
+      } else if (st.status === 'failed') {
+        clearInterval(pollRef.current)
+        setError(`research failed: ${st.error || 'unknown'}`)
+      }
+    }, 1500)
+  }
+
+  useEffect(() => () => { clearInterval(pollRef.current); if (esRef.current) esRef.current.close() }, [])
 
   const addWatch = async () => {
     try {
@@ -255,8 +294,15 @@ function OverviewHead({ company, market, fundamentals }) {
             {company?.cik && <> · <a href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${company.cik}`} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>SEC CIK {company.cik}</a></>}
           </div>
         </div>
-        <div className="freshness" style={{ alignSelf: 'flex-end' }}>
-          profile retrieved {utcStamp(company?.retrieved_at)}
+        <div style={{ textAlign: 'right' }}>
+          {quote?.price != null && (
+            <div style={{ fontSize: 22, fontWeight: 700 }}>
+              {quote.price.toFixed(2)} <span style={{ fontSize: 14 }} className={quote.change_pct >= 0 ? 'pos' : 'neg'}>
+                {quote.change_pct >= 0 ? '▲' : '▼'} {pct(quote.change_pct)}
+              </span>
+            </div>
+          )}
+          {quote && <div className="freshness">{quote.currency} · refreshed {utcStamp(quote.retrieved_at)} · may be delayed up to 15 min</div>}
         </div>
       </div>
       <div className="grid grid-4">

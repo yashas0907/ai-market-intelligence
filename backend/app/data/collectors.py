@@ -81,6 +81,25 @@ async def upsert_company(session, symbol: str, name: str, exchange: str | None =
     return company
 
 
+async def get_live_quote(symbol: str) -> dict[str, Any]:
+    """Live-ish quote (60s cache). Source may delay quotes up to 15 minutes — labeled."""
+    symbol = normalize_symbol(symbol)
+    chart = await cached(f"yahoo:quote:{symbol}", 60, lambda: _yahoo_market.get_chart(symbol, "1d"))
+    price = chart.get("regular_market_price")
+    prev = chart.get("chart_previous_close")
+    change = ((price - prev) / prev * 100) if (price is not None and prev) else None
+    return {
+        "symbol": symbol,
+        "price": price,
+        "change_pct": round(change, 2) if change is not None else None,
+        "currency": chart.get("currency"),
+        "exchange": chart.get("exchange"),
+        "as_of": chart.get("regular_market_time").isoformat() if chart.get("regular_market_time") else None,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "note": "Quote may be delayed up to 15 minutes (source limitation) — stamped with retrieval time.",
+    }
+
+
 async def search_companies(query: str, limit: int = 10) -> list[dict[str, Any]]:
     s = get_settings()
     query = sanitize_untrusted(query, max_len=100)

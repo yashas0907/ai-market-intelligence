@@ -48,6 +48,18 @@ async def company_profile(symbol: str, db: AsyncSession = Depends(get_db)) -> di
         raise HTTPException(status_code=502, detail=f"profile lookup failed: {str(exc)[:150]}")
 
 
+@router.get("/company/{symbol}/quote")
+async def company_quote(symbol: str) -> dict[str, Any]:
+    from app.data.collectors import get_live_quote
+
+    try:
+        return await get_live_quote(symbol)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"quote failed: {str(exc)[:150]}")
+
+
 @router.get("/company/{symbol}/market")
 async def company_market(symbol: str, range: str = Query(default="1y", pattern="^(1mo|3mo|6mo|1y|2y|5y|max)$"), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     from app.data.collectors import collect_market_data

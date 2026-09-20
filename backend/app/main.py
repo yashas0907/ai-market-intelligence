@@ -11,6 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api import compare, documents, routes, watchlist
+from app.api.stream import router as stream_router
 from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.observability import configure_logging, get_logger, obs
@@ -45,6 +46,7 @@ app.include_router(routes.router, prefix=API, tags=["companies"])
 app.include_router(watchlist.router, prefix=API, tags=["watchlist"])
 app.include_router(compare.router, prefix=API, tags=["compare"])
 app.include_router(documents.router, prefix=API, tags=["observability-documents"])
+app.include_router(stream_router, prefix=API, tags=["realtime"])
 
 
 @app.on_event("startup")

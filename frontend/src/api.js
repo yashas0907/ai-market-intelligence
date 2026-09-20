@@ -1,4 +1,8 @@
-const BASE = '/api'
+const BASE = import.meta.env.VITE_API_BASE || '/api'
+
+export function researchStreamUrl(jobId) {
+  return `${BASE}/research/${jobId}/stream`
+}
 
 async function handle(r) {
   if (!r.ok) {
@@ -31,6 +35,10 @@ export async function getFundamentals(symbol) {
 
 export async function getNews(symbol) {
   return fetch(`${BASE}/company/${encodeURIComponent(symbol)}/news`).then(handle)
+}
+
+export async function getQuote(symbol) {
+  return fetch(`${BASE}/company/${encodeURIComponent(symbol)}/quote`).then(handle)
 }
 
 export async function startResearch(symbol, depth = 'standard') {
