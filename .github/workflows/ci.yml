@@ -24,7 +24,7 @@ jobs:
         run: pytest tests -q -p no:cacheprovider
         env:
           LLM_PROVIDER: heuristic
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
 
   frontend-build:
     runs-on: ubuntu-latest
