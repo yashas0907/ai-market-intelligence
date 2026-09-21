@@ -18,3 +18,4 @@ tenacity
 pytest
 pytest-asyncio
 coverage
+ruff
