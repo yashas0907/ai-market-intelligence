@@ -42,6 +42,14 @@ app.add_middleware(
 )
 
 API = settings.api_prefix
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Landing: redirect to the interactive API docs so the root URL is never a 404."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/api/docs")
 app.include_router(routes.router, prefix=API, tags=["companies"])
 app.include_router(watchlist.router, prefix=API, tags=["watchlist"])
 app.include_router(compare.router, prefix=API, tags=["compare"])
