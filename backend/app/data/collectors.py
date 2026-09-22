@@ -116,6 +116,8 @@ async def search_companies(query: str, limit: int = 10) -> list[dict[str, Any]]:
             score = 3.0
         elif sym_l.startswith(ql):
             score = 2.5
+        elif name_l == ql:
+            score = 2.4
         elif ql in name_l:
             score = 2.0
         elif name_l.startswith(ql):
@@ -123,13 +125,31 @@ async def search_companies(query: str, limit: int = 10) -> list[dict[str, Any]]:
         else:
             continue
         hits.append({"symbol": row["symbol"], "name": row["name"], "exchange": "SEC", "cik": row["cik_padded"], "score": score})
-    hits.sort(key=lambda h: -h["score"])
-    if hits:
-        return hits[:limit]
 
-    yahoo_hits = await _yahoo_search.search(query, limit)
-    yahoo_hits.sort(key=lambda h: -h.get("score", 0))
-    return yahoo_hits[:limit]
+    # ALWAYS merge Yahoo search hits (international listings: .NS/.BO/.L/.TO etc.
+    # are not in the SEC registrant map and were previously hidden when any SEC
+    # match existed — e.g. "reliance" surfaced the US steel company, not RELIANCE.NS).
+    try:
+        yahoo_hits = await _yahoo_search.search(query, limit)
+    except Exception:
+        yahoo_hits = []
+    for h in yahoo_hits:
+        if any(x["symbol"] == h["symbol"] for x in hits):
+            continue
+        sym_l = h["symbol"].lower()
+        name_l = (h.get("name") or "").lower()
+        if ql == sym_l:
+            score = 3.0
+        elif sym_l.startswith(ql):
+            score = 2.5
+        elif ql in name_l:
+            score = 2.0
+        else:
+            score = 1.0
+        hits.append({"symbol": h["symbol"], "name": h.get("name") or h["symbol"], "exchange": h.get("exchange"), "cik": None, "score": score})
+
+    hits.sort(key=lambda h: -h["score"])
+    return hits[:limit]
 
 
 # SEC SIC division ranges → human-readable sector names
