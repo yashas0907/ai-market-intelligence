@@ -37,4 +37,6 @@ jobs:
         with:
           node-version: "20"
       - run: npm ci || npm install
+      - name: Lint (no-undef guard — catches undefined-variable crashes)
+        run: npm run lint
       - run: npm run build
