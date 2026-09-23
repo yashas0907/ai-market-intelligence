@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Legend, BarChart, Bar, CartesianGrid, ReferenceLine
@@ -10,7 +10,7 @@ import {
 } from '../api.js'
 import {
   fmt, pct, timeAgo, utcStamp, SentimentBadge, SeverityBadge,
-  VerificationBadge, Freshness, Spinner, ErrorBox
+  VerificationBadge, Freshness, Skeleton, LiveDot, ErrorBox
 } from '../components.jsx'
 
 const RANGES = ['1mo', '3mo', '6mo', '1y', '2y', '5y']
@@ -27,7 +27,6 @@ export default function Dashboard() {
   const [fundamentals, setFundamentals] = useState(null)
   const [news, setNews] = useState(null)
   const [report, setReport] = useState(null)
-  const [jobId, setJobId] = useState(null)
   const [jobStatus, setJobStatus] = useState(null)
   const [depth, setDepth] = useState('standard')
   const [loading, setLoading] = useState({})
@@ -66,7 +65,7 @@ export default function Dashboard() {
     setShowDropdown(false)
     setQuery(sym)
     setSymbol(sym)
-    setReport(null); setJobId(null); setJobStatus(null)
+    setReport(null); setJobStatus(null)
     setTab('overview')
     const c = await one('company', getCompany)(sym)
     if (c) setCompany(c)
@@ -89,7 +88,6 @@ export default function Dashboard() {
     if (s && /^[A-Za-z0-9.\-^]{1,12}$/.test(s)) {
       selectSymbol(s.toUpperCase())
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -109,7 +107,6 @@ export default function Dashboard() {
     const r = await one('research', startResearch)(symbol, depth)
     if (r) {
       setReport(r.deduplicated ? r.report : null)
-      setJobId(r.job_id)
       setTab('report')
       if (!r.deduplicated) {
         clearInterval(pollRef.current)
@@ -201,15 +198,15 @@ export default function Dashboard() {
       <ErrorBox error={error} />
 
       <Tabs tab={tab} setTab={setTab} />
-      {loading.company && <Spinner label="Loading company profile…" />}
+      {loading.company && <div className="panel"><h3>COMPANY PROFILE</h3><Skeleton lines={2} boxes={1} /></div>}
 
       {tab === 'overview' && (
         <>
-          <OverviewHead company={company} market={market} fundamentals={fundamentals} />
+          <OverviewHead company={company} market={market} fundamentals={fundamentals} quote={quote} />
           <div className="panel">
             <h3>PRICE — {symbol} <span className="freshness">({range} daily, split-adjusted · retrieved {utcStamp(market?.retrieved_at)})</span></h3>
             <RangeBar range={range} setRange={setRange} />
-            {loading.market ? <Spinner label="Loading market data…" /> : (
+            {loading.market ? <div className="panel"><h3>PRICE</h3><Skeleton lines={0} boxes={2} /></div> : (
               <ResponsiveContainer width="100%" height={320}>
                 <AreaChart data={closes}>
                   <defs>
@@ -279,7 +276,7 @@ function Metric({ label, value, sub, tone }) {
   )
 }
 
-function OverviewHead({ company, market, fundamentals }) {
+function OverviewHead({ company, market, fundamentals, quote }) {
   const closes = market?.points?.map(p => p.close).filter(Boolean) || []
   const chg = closes.length >= 2 ? (closes[closes.length - 1] - closes[0]) / closes[0] * 100 : null
   const latest = fundamentals?.derived?.latest || {}
@@ -302,7 +299,11 @@ function OverviewHead({ company, market, fundamentals }) {
               </span>
             </div>
           )}
-          {quote && <div className="freshness">{quote.currency} · refreshed {utcStamp(quote.retrieved_at)} · may be delayed up to 15 min</div>}
+          {quote && (
+            <div className="freshness">
+              <LiveDot />{quote.currency} · auto-refresh 60s · delayed ≤15 min
+            </div>
+          )}
         </div>
       </div>
       <div className="grid grid-4">
@@ -366,7 +367,7 @@ function EventsPanel({ news }) {
 }
 
 function TechnicalTab({ technical, loading, range }) {
-  if (loading) return <Spinner label="Computing indicators…" />
+  if (loading) return <div className="panel"><h3>TECHNICAL INDICATORS</h3><Skeleton lines={2} boxes={2} /></div>
   if (!technical) return <div className="panel">Technical data unavailable.</div>
   const s = technical.series || {}
   const data = (s.ts || []).map((ts, i) => ({
@@ -440,7 +441,7 @@ function TechnicalTab({ technical, loading, range }) {
 }
 
 function FundamentalsTab({ fundamentals, loading }) {
-  if (loading) return <Spinner label="Loading SEC XBRL fundamentals…" />
+  if (loading) return <div className="panel"><h3>FUNDAMENTALS</h3><Skeleton lines={2} boxes={1} /></div>
   if (!fundamentals) return <div className="panel">Fundamentals unavailable.</div>
   if (fundamentals.error) return <div className="panel"><h3>FUNDAMENTALS</h3><div className="freshness">⚠️ {fundamentals.error}</div></div>
   const d = fundamentals.derived || {}
@@ -485,7 +486,7 @@ function FundamentalsTab({ fundamentals, loading }) {
 }
 
 function NewsTab({ news, loading }) {
-  if (loading) return <Spinner label="Collecting news…" />
+  if (loading) return <div className="panel"><h3>RECENT NEWS</h3><Skeleton lines={5} /></div>
   if (!news) return <div className="panel">News unavailable.</div>
   return (
     <div className="panel">
@@ -505,7 +506,7 @@ function NewsTab({ news, loading }) {
 }
 
 function ReportTab({ report, jobStatus, loading }) {
-  if (loading && !report) return <Spinner label="Starting research pipeline…" />
+  if (loading && !report) return <div className="panel"><h3>AI RESEARCH REPORT</h3><div className="freshness">Starting research pipeline…</div><Skeleton lines={4} boxes={1} /></div>
   if (!report && jobStatus) return <ProgressTrace status={jobStatus} />
   if (!report) return (
     <div className="panel">
@@ -643,16 +644,17 @@ function ReportView({ report }) {
 
 function SearchLanding({ query, setQuery, hits, showDropdown, doSearch, onSelect, error }) {
   return (
-    <div className="container" style={{ paddingTop: 80 }}>
-      <div style={{ textAlign: 'center', marginBottom: 30 }}>
-        <div style={{ fontSize: 32, fontWeight: 700 }}>AI Market Intelligence & Research</div>
-        <div className="freshness" style={{ marginTop: 8, fontSize: 14 }}>
-          Evidence-backed research reports: market data · SEC fundamentals · technicals · news sentiment · risk analysis · cited synthesis
+    <div className="container">
+      <div className="hero">
+        <div className="hero-title">AI Market Intelligence<br />& Research Platform</div>
+        <div className="hero-sub">
+          Evidence-backed research reports for any publicly traded company — market data, SEC fundamentals,
+          technicals, news sentiment, risk analysis and cited AI synthesis. Every claim traceable to its source.
         </div>
       </div>
       <div className="searchbar" style={{ maxWidth: 560, margin: '0 auto' }}>
         <div className="results">
-          <input value={query} autoFocus placeholder="Search a publicly traded company (e.g. AAPL, MSFT, TSLA)"
+          <input value={query} autoFocus placeholder="Search a company — AAPL, MSFT, RELIANCE.NS, TCS.NS…"
             onChange={e => setQuery(e.target.value)} />
           {showDropdown && (
             <div className="dropdown">
@@ -667,13 +669,25 @@ function SearchLanding({ query, setQuery, hits, showDropdown, doSearch, onSelect
         </div>
       </div>
       <ErrorBox error={error} />
-      <div className="grid grid-3" style={{ marginTop: 40, maxWidth: 900, margin: '40px auto 0' }}>
-        <div className="metric"><div className="label">Deterministic Analytics</div><div className="value" style={{ fontSize: 15 }}>All numbers computed from real data</div></div>
-        <div className="metric"><div className="label">Evidence Layer</div><div className="value" style={{ fontSize: 15 }}>Claim → evidence → source provenance</div></div>
-        <div className="metric"><div className="label">Multi-Agent</div><div className="value" style={{ fontSize: 15 }}>Specialized + fact-checked agents</div></div>
+      <div className="grid grid-3" style={{ maxWidth: 960, margin: '50px auto 0' }}>
+        <div className="metric feature-card">
+          <div className="icon">📊</div>
+          <div className="title">Deterministic Analytics</div>
+          <div className="desc">Every number computed from real data — never generated, never estimated.</div>
+        </div>
+        <div className="metric feature-card">
+          <div className="icon">🔗</div>
+          <div className="title">Evidence Provenance</div>
+          <div className="desc">Claim → evidence → source → retrieval time. Audit every statement.</div>
+        </div>
+        <div className="metric feature-card">
+          <div className="icon">🤖</div>
+          <div className="title">Multi-Agent + RAG</div>
+          <div className="desc">Specialized agents, fact-checked claims, real-time SSE progress.</div>
+        </div>
       </div>
-      <div className="disclaimer" style={{ marginTop: 60 }}>
-        ⚠️ EDUCATIONAL/RESEARCH TOOL — NOT FINANCIAL ADVICE. This platform aggregates public data and presents analytical signals with uncertainty. No buy/sell recommendations or guaranteed outcomes.
+      <div className="disclaimer" style={{ maxWidth: 960, marginLeft: 'auto', marginRight: 'auto' }}>
+        ⚠️ EDUCATIONAL/RESEARCH TOOL — NOT FINANCIAL ADVICE. Aggregates public data and presents analytical signals with uncertainty. No buy/sell recommendations or guaranteed outcomes.
       </div>
     </div>
   )

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { searchCompanies, compareCompanies } from '../api.js'
 import { fmt, pct, utcStamp, SentimentBadge, Spinner, ErrorBox } from '../components.jsx'
 

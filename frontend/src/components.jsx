@@ -69,6 +69,19 @@ export function Spinner({ label }) {
   return <div className="freshness fade-in" style={{ padding: 20 }}>⏳ {label || 'Loading…'}</div>
 }
 
+export function Skeleton({ lines = 3, boxes = 0 }) {
+  return (
+    <div style={{ marginTop: 14 }}>
+      {Array.from({ length: boxes }).map((_, i) => <div key={`b${i}`} className="skeleton skeleton-box" />)}
+      {Array.from({ length: lines }).map((_, i) => <div key={`l${i}`} className="skeleton skeleton-line" style={{ width: `${90 - (i % 3) * 18}%` }} />)}
+    </div>
+  )
+}
+
+export function LiveDot() {
+  return <span className="live-dot" />
+}
+
 export function ErrorBox({ error }) {
   if (!error) return null
   return <div className="disclaimer">⚠️ {error}</div>

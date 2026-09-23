@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getWatchlist, removeFromWatchlist, getCompany, getFundamentals } from '../api.js'
+import { getWatchlist, removeFromWatchlist, getFundamentals } from '../api.js'
 import { fmt, pct, utcStamp, Spinner, ErrorBox } from '../components.jsx'
 
 export default function Watchlist() {
