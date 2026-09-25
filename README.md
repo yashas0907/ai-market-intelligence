@@ -1,6 +1,8 @@
 # AI Market Intelligence & Research Platform
 
-An evidence-backed market research platform: pick any publicly traded company and receive a structured intelligence report combining live quotes, market data, SEC fundamentals, technical indicators, news sentiment, risk analysis, and AI synthesis — **with every claim traceable to its source**. Real-time research progress streams to the dashboard via Server-Sent Events.
+[![CI](https://github.com/yashas0907/ai-market-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/yashas0907/ai-market-intelligence/actions/workflows/ci.yml)
+
+An evidence-backed market research platform: pick any publicly traded company (US or international — NSE/BSE/NASDAQ/NYSE) and receive a structured intelligence report combining live quotes, market data, SEC fundamentals, technical indicators, news sentiment, risk analysis, and AI synthesis — **with every claim traceable to its source**. Real-time research progress streams to the dashboard via Server-Sent Events.
 
 **By Yashas P Phatak.**
 
@@ -143,8 +145,11 @@ Real measurements only — [docs/METHODOLOGY.md](docs/METHODOLOGY.md):
 |---|---|
 | Sentiment (30 hand-labeled headlines) | accuracy 0.933; per-class F1 0.90–0.95 |
 | RAG retrieval | precision@1 = 1.0 (4/4); metadata filter correct |
-| Agentic run (AAPL, real data) | 18/18 claims with evidence; unsupported-claim rate 0.0 |
+| Agentic run (real data, deterministic LLM) | 18/18 claims with evidence; unsupported-claim rate 0.0 |
+| Agentic run (real data, real LLM via Groq) | 14/14 claims SUPPORTED; unsupported-claim rate 0.0 |
 | ML regime classifier | see table above (baseline comparisons included) |
+| User journey (deployed, 25 timed checks) | 25/25 PASS |
+| Multi-company stress (8 tickers incl. IFRS filer) | 8/8 PASS |
 
 **Tests: 89 passing** — data validation (symbols, timestamps, sanitization), calculations (indicators vs hand-computed values), ML leakage (4 dedicated temporal-integrity tests), agents (state, fact-checker classifications, failure recovery), API (ASGI-level, mocked sources, upload security), RAG (chunking, filtering, relevance).
 
@@ -218,7 +223,9 @@ python scripts/train_and_register.py AAPL MSFT      # ML pipeline
 
 ## Usage
 
-1. Search a company (e.g., "AAPL", "Microsoft") — Overview loads profile, price chart, sentiment, event signals.
+**Live demo:** frontend at [ai-market-intelligence-six.vercel.app](https://ai-market-intelligence-six.vercel.app) · backend API at [ai-market-intelligence-h07s.onrender.com/api/docs](https://ai-market-intelligence-h07s.onrender.com/api/docs) (free tier — sleeps after ~15 min idle; first request takes ~30s).
+
+1. Search a company (e.g., "AAPL", "Microsoft", "RELIANCE.NS") — Overview loads profile, live quote, price chart, sentiment, event signals.
 2. Tabs: Technical (indicators + charts + signals), Fundamentals (SEC FY metrics + trends), News (linked articles with per-article sentiment).
 3. **Generate Research Report** → live pipeline trace → full report: executive summary, bull/bear cases with evidence, contradictions, risk dashboard, key unknowns, claim-verification trace, data freshness, source list.
 4. Compare mode: A vs B on growth/profitability/leverage/volatility/sentiment with stated methodology.
