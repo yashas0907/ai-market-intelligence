@@ -34,7 +34,7 @@ export async function getFundamentals(symbol) {
 }
 
 export async function getNews(symbol) {
-  return fetch(`${BASE}/company/${encodeURIComponent(symbol)}/news`).then(handle)
+  return fetch(`${BASE}/company/${encodeURIComponent(symbol)}/news?limit=12`).then(handle)
 }
 
 export async function getQuote(symbol) {

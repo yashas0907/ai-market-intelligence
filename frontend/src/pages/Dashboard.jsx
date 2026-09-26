@@ -57,20 +57,24 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (query.length < 2) { setShowDropdown(false); return }
+    // skip re-search right after selection: query was set to the chosen symbol
+    if (symbol && query.toUpperCase() === symbol) { setShowDropdown(false); return }
     const t = setTimeout(() => doSearch(query), 300)
     return () => clearTimeout(t)
-  }, [query])
+  }, [query, symbol])
 
   const selectSymbol = async (sym) => {
     setShowDropdown(false)
     setQuery(sym)
     setSymbol(sym)
     setReport(null); setJobStatus(null)
+    setCompany(null); setMarket(null); setTechnical(null); setFundamentals(null); setNews(null)
     setTab('overview')
-    const c = await one('company', getCompany)(sym)
-    if (c) setCompany(c)
-    const m = await one('market', getMarket)(sym, range)
-    if (m) setMarket(m)
+    one('company', getCompany)(sym).then(c => c && setCompany(c))
+    one('market', getMarket)(sym, range).then(m => m && setMarket(m))
+    one('technical', getTechnical)(sym, range).then(t => t && setTechnical(t))
+    one('fundamentals', getFundamentals)(sym).then(f => f && setFundamentals(f))
+    one('news', getNews)(sym).then(n => n && setNews(n))
   }
 
   // live quote ticker: 60s auto-refresh while a symbol is selected (honestly labeled)
@@ -97,7 +101,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!symbol) return
-    one('technical', getTechnical)(symbol, range).then(t => t && setTechnical(t))
     one('fundamentals', getFundamentals)(symbol).then(f => f && setFundamentals(f))
     one('news', getNews)(symbol).then(n => n && setNews(n))
   }, [symbol, range])

@@ -44,10 +44,6 @@ class Orchestrator:
         state = WorkflowState(symbol=symbol, company_name=symbol, depth=depth)
         state.record_stage("collect:profile")
 
-        profile = await resolve_company_profile(self.session, symbol)
-        state.profile = profile
-        state.company_name = profile["name"]
-
         class _Ctx:
             def __init__(self, state_, session_, llm_):
                 self.state = state_
@@ -57,16 +53,41 @@ class Orchestrator:
         llm = get_llm()
         ctx = _Ctx(state, self.session, llm)
 
-        state.record_stage("collect:market")
-        try:
+        # Collect phase: profile first (news query needs the company name),
+        # then market + news PREFETCH in parallel — each with its own DB session
+        # (SQLite: no shared-session concurrency). The prefetch warms the caches
+        # so the analysis agents hit them instantly instead of re-fetching.
+        from app.core.db import SessionLocal
+
+        profile = await resolve_company_profile(self.session, symbol)
+        state.profile = profile
+        state.company_name = profile["name"]
+
+        async def collect_market_branch():
             from app.tools.registry import tool_market_data
 
-            r = await tool_market_data(self.session, type("P", (), {"symbol": symbol, "range": "1y"})())
-            if r.ok:
-                state.market = {"points": r.data["points"], "currency": r.data["currency"], "retrieved_at": r.data["retrieved_at"]}
-                state.data_freshness.append({"source": "Yahoo Finance chart API", "retrieved_at": r.data["retrieved_at"], "note": "daily OHLCV"})
-        except Exception as exc:
-            state.errors.append(f"market collection: {str(exc)[:150]}")
+            async with SessionLocal() as s:
+                return await tool_market_data(s, type("P", (), {"symbol": symbol, "range": "1y"})())
+
+        async def collect_news_branch():
+            from app.core.config import get_settings as _gs
+
+            async with SessionLocal() as s:
+                return await collect_news(s, symbol, profile["name"], _gs().research_max_news_articles)
+
+        state.record_stage("collect:market")
+        from app.data.collectors import collect_news
+
+        market_res, news_res = await asyncio.gather(collect_market_branch(), collect_news_branch(), return_exceptions=True)
+
+        if isinstance(market_res, Exception):
+            state.errors.append(f"market collection: {str(market_res)[:150]}")
+        elif market_res.ok:
+            state.market = {"points": market_res.data["points"], "currency": market_res.data["currency"], "retrieved_at": market_res.data["retrieved_at"]}
+            state.data_freshness.append({"source": "Yahoo Finance chart API", "retrieved_at": market_res.data["retrieved_at"], "note": "daily OHLCV"})
+
+        if isinstance(news_res, Exception):
+            state.errors.append(f"news prefetch: {str(news_res)[:150]}")
 
         progress_pct = 10
         await self._update_session(db_session_row, progress=progress_pct, stage="Data collection", stages=state.progress)
