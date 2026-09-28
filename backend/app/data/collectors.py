@@ -126,27 +126,30 @@ async def search_companies(query: str, limit: int = 10) -> list[dict[str, Any]]:
             continue
         hits.append({"symbol": row["symbol"], "name": row["name"], "exchange": "SEC", "cik": row["cik_padded"], "score": score})
 
-    # ALWAYS merge Yahoo search hits (international listings: .NS/.BO/.L/.TO etc.
-    # are not in the SEC registrant map and were previously hidden when any SEC
-    # match existed — e.g. "reliance" surfaced the US steel company, not RELIANCE.NS).
-    try:
-        yahoo_hits = await _yahoo_search.search(query, limit)
-    except Exception:
-        yahoo_hits = []
-    for h in yahoo_hits:
-        if any(x["symbol"] == h["symbol"] for x in hits):
-            continue
-        sym_l = h["symbol"].lower()
-        name_l = (h.get("name") or "").lower()
-        if ql == sym_l:
-            score = 3.0
-        elif sym_l.startswith(ql):
-            score = 2.5
-        elif ql in name_l:
-            score = 2.0
-        else:
-            score = 1.0
-        hits.append({"symbol": h["symbol"], "name": h.get("name") or h["symbol"], "exchange": h.get("exchange"), "cik": None, "score": score})
+    # Merge Yahoo search hits ONLY when no SEC hit strongly matches the query
+    # (exact/prefix symbol). International listings (.NS/.BO/.L) are absent from
+    # the SEC map, so their queries still reach Yahoo — but common US ticker
+    # searches skip the extra network round-trip entirely.
+    has_strong_sec_match = any(h["score"] >= 2.5 for h in hits)
+    if not has_strong_sec_match:
+        try:
+            yahoo_hits = await _yahoo_search.search(query, limit)
+        except Exception:
+            yahoo_hits = []
+        for h in yahoo_hits:
+            if any(x["symbol"] == h["symbol"] for x in hits):
+                continue
+            sym_l = h["symbol"].lower()
+            name_l = (h.get("name") or "").lower()
+            if ql == sym_l:
+                score = 3.0
+            elif sym_l.startswith(ql):
+                score = 2.5
+            elif ql in name_l:
+                score = 2.0
+            else:
+                score = 1.0
+            hits.append({"symbol": h["symbol"], "name": h.get("name") or h["symbol"], "exchange": h.get("exchange"), "cik": None, "score": score})
 
     hits.sort(key=lambda h: -h["score"])
     return hits[:limit]
