@@ -244,11 +244,14 @@ async def resolve_company_profile(session, symbol: str) -> dict[str, Any]:
 async def collect_market_data(session, symbol: str, range_: str = "1y") -> dict[str, Any]:
     s = get_settings()
     symbol = normalize_symbol(symbol)
-    chart = await cached(
-        f"yahoo:chart:{symbol}:{range_}",
-        s.cache_market_ttl,
-        lambda: _yahoo_market.get_chart(symbol, range_),
-    )
+    cache_key = f"yahoo:chart:{symbol}:{range_}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        # Fast path: serve the cached chart and SKIP the DB persistence loop
+        # (250 individual upserts ≈ 2s on throttled free-tier CPU — must not
+        # re-run on every request).
+        return hit
+    chart = await _yahoo_market.get_chart(symbol, range_)
     company = await get_company_by_symbol(session, symbol)
     if company is None:
         company = await upsert_company(session, symbol=symbol, name=symbol)
@@ -271,7 +274,9 @@ async def collect_market_data(session, symbol: str, range_: str = "1y") -> dict[
         await session.execute(stmt)
         rows_written += 1
     logger.info("collector.market_data", symbol=symbol, rows=rows_written, range=range_)
-    return {"symbol": symbol, "points": chart["points"], "currency": chart.get("currency"), "exchange": chart.get("exchange"), "retrieved_at": chart["retrieved_at"], "rows_written": rows_written}
+    result = {"symbol": symbol, "points": chart["points"], "currency": chart.get("currency"), "exchange": chart.get("exchange"), "retrieved_at": chart["retrieved_at"], "rows_written": rows_written}
+    cache_set(cache_key, result, s.cache_market_ttl)
+    return result
 
 
 # ---- Fundamentals from SEC XBRL ----
@@ -449,11 +454,13 @@ async def collect_news(session, symbol: str, company_name: str, limit: int | Non
     symbol = normalize_symbol(symbol)
     limit = limit or s.research_max_news_articles
 
-    feed = await cached(
-        f"news:feed:{symbol}",
-        s.cache_news_ttl,
-        lambda: _news.fetch_feed(symbol, company_name, limit),
-    )
+    cache_key = f"news:result:{symbol}:{limit}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        # Fast path: serve cached articles, skip the per-article upsert loop.
+        return hit
+
+    feed = await _news.fetch_feed(symbol, company_name, limit)
 
     company = await get_company_by_symbol(session, symbol)
     if company is None:
@@ -488,4 +495,6 @@ async def collect_news(session, symbol: str, company_name: str, limit: int | Non
         stored.append({**item, "published_at": published, "article_id": h})
 
     logger.info("collector.news", symbol=symbol, articles=len(stored))
-    return {"symbol": symbol, "articles": stored, "retrieved_at": datetime.now(timezone.utc)}
+    result = {"symbol": symbol, "articles": stored, "retrieved_at": datetime.now(timezone.utc)}
+    cache_set(cache_key, result, s.cache_news_ttl)
+    return result
