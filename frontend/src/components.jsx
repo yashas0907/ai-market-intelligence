@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 
 export function Nav() {
@@ -74,6 +75,20 @@ export function Skeleton({ lines = 3, boxes = 0 }) {
     <div style={{ marginTop: 14 }}>
       {Array.from({ length: boxes }).map((_, i) => <div key={`b${i}`} className="skeleton skeleton-box" />)}
       {Array.from({ length: lines }).map((_, i) => <div key={`l${i}`} className="skeleton skeleton-line" style={{ width: `${90 - (i % 3) * 18}%` }} />)}
+    </div>
+  )
+}
+
+export function SlowHint({ seconds = 5 }) {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), seconds * 1000)
+    return () => clearTimeout(t)
+  }, [seconds])
+  if (!show) return null
+  return (
+    <div className="freshness" style={{ marginTop: 8 }}>
+      ⏳ Still loading — the free-tier backend may be waking up from idle (can take ~30s). Data will appear automatically.
     </div>
   )
 }

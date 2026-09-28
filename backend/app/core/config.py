@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""
     llm_base_url: str = ""
-    llm_max_tokens: int = 1500
+    llm_max_tokens: int = 900
     llm_temperature: float = 0.2
 
     embedding_provider: Literal["local", "openai"] = "local"
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     source_max_retries: int = 2
     source_retry_backoff: float = 1.5
 
-    cache_market_ttl: int = 900
+    cache_market_ttl: int = 3600
     cache_fundamentals_ttl: int = 43200
     cache_news_ttl: int = 1800
     cache_company_ttl: int = 86400

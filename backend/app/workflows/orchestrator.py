@@ -70,10 +70,9 @@ class Orchestrator:
                 return await tool_market_data(s, type("P", (), {"symbol": symbol, "range": "1y"})())
 
         async def collect_news_branch():
-            from app.core.config import get_settings as _gs
-
             async with SessionLocal() as s:
-                return await collect_news(s, symbol, profile["name"], _gs().research_max_news_articles)
+                limit = {"quick": 10, "standard": 20, "deep": 30}.get(depth, 20)
+                return await collect_news(s, symbol, profile["name"], limit)
 
         state.record_stage("collect:market")
         from app.data.collectors import collect_news

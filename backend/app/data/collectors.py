@@ -323,15 +323,58 @@ def _annual_only(units: dict[str, list[dict[str, Any]]]) -> dict[str, dict[int, 
 
 
 async def collect_fundamentals(session, symbol: str) -> dict[str, Any]:
+    """Stale-while-revalidate: TTL cache → persisted DB metrics (if fresh, with
+    background refresh) → synchronous SEC fetch. Never fabricates values."""
     s = get_settings()
     symbol = normalize_symbol(symbol)
+
+    cache_key = f"fund:result:{symbol}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        return hit
+
     company = await get_company_by_symbol(session, symbol)
     if company is None or not company.cik:
         await resolve_company_profile(session, symbol)
         company = await get_company_by_symbol(session, symbol)
     if company is None or not company.cik:
-        return {"symbol": symbol, "metrics": [], "retrieved_at": datetime.now(timezone.utc), "error": "no SEC CIK available for this ticker"}
+        result = {"symbol": symbol, "metrics": [], "retrieved_at": datetime.now(timezone.utc), "error": "no SEC CIK available for this ticker"}
+        cache_set(cache_key, result, 600)
+        return result
 
+    rows = (await session.execute(select(FundamentalMetric).where(FundamentalMetric.company_id == company.id))).scalars().all()
+    newest = max((r.retrieved_at for r in rows), default=None)
+    if rows and newest and (datetime.now(timezone.utc) - newest).total_seconds() < s.cache_fundamentals_ttl:
+        metrics = [
+            {"metric_key": r.metric_key, "value": r.value, "unit": r.unit, "fiscal_year": r.fiscal_year, "period": r.period, "source": r.source}
+            for r in rows
+        ]
+        result = {"symbol": symbol, "metrics": metrics, "retrieved_at": newest, "error": None}
+        cache_set(cache_key, result, s.cache_fundamentals_ttl)
+        obs.incr("cache_swr_serve", source="fundamentals")
+        asyncio.create_task(_bg_refresh_fundamentals(symbol))
+        return result
+
+    return await _fetch_and_store_fundamentals(session, symbol, company, s, cache_key)
+
+
+async def _bg_refresh_fundamentals(symbol: str) -> None:
+    from app.core.db import SessionLocal
+
+    try:
+        async with SessionLocal() as s:
+            s2 = get_settings()
+            company = await get_company_by_symbol(s, symbol)
+            if company is None or not company.cik:
+                return
+            cache_key = f"fund:result:{symbol}"
+            await _fetch_and_store_fundamentals(s, symbol, company, s2, cache_key)
+            logger.info("collector.fundamentals_bg_refresh", symbol=symbol)
+    except Exception as exc:
+        logger.warning("collector.fundamentals_bg_fail", symbol=symbol, error=str(exc)[:150])
+
+
+async def _fetch_and_store_fundamentals(session, symbol: str, company, s, cache_key: str) -> dict[str, Any]:
     facts = await cached(f"sec:companyfacts:{company.cik}", s.cache_fundamentals_ttl, lambda: _sec.get_companyfacts(company.cik))
     us_gaap = (facts.get("facts") or {}).get("us-gaap") or {}
     metrics: list[dict[str, Any]] = []
@@ -393,7 +436,9 @@ async def collect_fundamentals(session, symbol: str) -> dict[str, Any]:
         await session.execute(stmt)
 
     logger.info("collector.fundamentals", symbol=symbol, metrics=len(metrics))
-    return {"symbol": symbol, "metrics": metrics, "retrieved_at": retrieved_at, "error": None}
+    result = {"symbol": symbol, "metrics": metrics, "retrieved_at": retrieved_at, "error": None}
+    cache_set(cache_key, result, s.cache_fundamentals_ttl)
+    return result
 
 
 async def collect_news(session, symbol: str, company_name: str, limit: int | None = None) -> dict[str, Any]:

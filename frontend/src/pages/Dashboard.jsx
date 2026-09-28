@@ -10,7 +10,7 @@ import {
 } from '../api.js'
 import {
   fmt, pct, timeAgo, utcStamp, SentimentBadge, SeverityBadge,
-  VerificationBadge, Freshness, Skeleton, LiveDot, ErrorBox
+  VerificationBadge, Freshness, Skeleton, SlowHint, LiveDot, ErrorBox
 } from '../components.jsx'
 
 const RANGES = ['1mo', '3mo', '6mo', '1y', '2y', '5y']
@@ -201,7 +201,7 @@ export default function Dashboard() {
       <ErrorBox error={error} />
 
       <Tabs tab={tab} setTab={setTab} />
-      {loading.company && <div className="panel"><h3>COMPANY PROFILE</h3><Skeleton lines={2} boxes={1} /></div>}
+      {loading.company && <div className="panel"><h3>COMPANY PROFILE</h3><Skeleton lines={2} boxes={1} /><SlowHint /></div>}
 
       {tab === 'overview' && (
         <>
@@ -209,7 +209,7 @@ export default function Dashboard() {
           <div className="panel">
             <h3>PRICE — {symbol} <span className="freshness">({range} daily, split-adjusted · retrieved {utcStamp(market?.retrieved_at)})</span></h3>
             <RangeBar range={range} setRange={setRange} />
-            {loading.market ? <div className="panel"><h3>PRICE</h3><Skeleton lines={0} boxes={2} /></div> : (
+            {loading.market ? <div className="panel"><h3>PRICE</h3><Skeleton lines={0} boxes={2} /><SlowHint /></div> : (
               <ResponsiveContainer width="100%" height={320}>
                 <AreaChart data={closes}>
                   <defs>

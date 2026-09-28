@@ -134,6 +134,39 @@ class TestSynthesizer:
         assert state.key_unknowns  # unknowns always present (epistemic honesty)
         assert "no forward-looking guidance" in " ".join(state.key_unknowns).lower()
 
+    @pytest.mark.asyncio
+    async def test_standard_depth_produces_exec_summary_without_recursion(self):
+        """Guards the _summarize → LLM path at standard depth (regression: infinite recursion)."""
+        from app.agents.specialized import ResearchSynthesizerAgent
+
+        state = WorkflowState(symbol="TEST", company_name="Test")
+        state.fundamentals = {"derived": {"latest": {"revenue": {"value": 100.0, "period": "2025-12-31"}}}}
+        state.sentiment = {"aggregate_label": "neutral", "aggregate_score": 0.0, "article_count": 3}
+        ctx = FakeCtx(state)  # depth=standard, HeuristicLLM (deterministic, no network)
+        result = await ResearchSynthesizerAgent().run(ctx)
+        assert state.agent_results.get("research_synthesizer", {}).get("status") == "ok", f"synthesizer failed: {state.errors}"
+        assert state.report.get("executive_summary"), "executive summary missing at standard depth"
+        assert result.get("summary")
+
+    @pytest.mark.asyncio
+    async def test_quick_depth_skips_llm(self):
+        """Quick depth must not call the LLM provider's generate path per agent."""
+        from app.agents.specialized import ResearchSynthesizerAgent
+
+        calls = []
+
+        class CountingLLM:
+            async def generate(self, prompt, max_tokens=None):
+                calls.append(prompt)
+                return "llm summary"
+
+        state = WorkflowState(symbol="TEST", company_name="Test", depth="quick")
+        state.fundamentals = {"derived": {"latest": {"revenue": {"value": 100.0, "period": "2025-12-31"}}}}
+        state.sentiment = {"aggregate_label": "neutral", "aggregate_score": 0.0, "article_count": 3}
+        ctx = FakeCtx(state, llm=CountingLLM())
+        await ResearchSynthesizerAgent().run(ctx)
+        assert len(calls) <= 1, f"quick depth made {len(calls)} LLM calls (should be <=1)"
+
 
 class TestEventDetection:
     def test_event_patterns(self):

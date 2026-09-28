@@ -13,7 +13,7 @@ from app.agents.state import WorkflowState
 from app.analytics.sentiment import aggregate_sentiment, analyze_article
 from app.core.observability import logger, obs
 from app.data.validation import sanitize_untrusted
-from app.services.llm import LLMProvider, generate_section
+from app.services.llm import LLMProvider
 from app.tools.registry import (
     NewsToolParams,
     TechnicalToolParams,
@@ -39,6 +39,20 @@ class BaseAgent:
 
 def _elapsed_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
+
+
+async def _summarize(ctx: AgentContext, task: str, data: Any, max_tokens: int | None = None) -> str:
+    """LLM interpretation of calculated numbers — skipped for quick-depth runs
+    (deterministic summary instead) to cut latency and cost."""
+    if ctx.state.depth == "quick":
+        import json as _json
+
+        from app.services.llm import extract_facts_summary
+
+        return extract_facts_summary(f"{task}\n" + (_json.dumps(data, default=str) if isinstance(data, dict) else str(data)))
+    from app.services.llm import generate_section
+
+    return await generate_section(ctx.llm, task, data, max_tokens=max_tokens)
 
 
 async def _run_agent(ctx: AgentContext, agent: "BaseAgent", agent_fn) -> dict[str, Any]:
@@ -118,7 +132,7 @@ class MarketDataAgent(BaseAgent):
                 findings.append({"finding": "avg_daily_volume", "value": round(avg_vol), "evidence_id": None})
                 state.market["avg_daily_volume"] = round(avg_vol)
 
-            summary = await generate_section(ctx.llm, "Summarize the market behavior for this stock over the analysis window (trend direction, volatility, drawdown). Neutral tone, historical observations only.", {"price_change_pct": findings[0]["value"] if findings else None, "annualized_volatility_pct": vol, "max_drawdown_pct": mdd, "period_days": len(closes), "avg_daily_volume": state.market.get("avg_daily_volume")})
+            summary = await _summarize(ctx, "Summarize the market behavior for this stock over the analysis window (trend direction, volatility, drawdown). Neutral tone, historical observations only.", {"price_change_pct": findings[0]["value"] if findings else None, "annualized_volatility_pct": vol, "max_drawdown_pct": mdd, "period_days": len(closes), "avg_daily_volume": state.market.get("avg_daily_volume")})
             return {"summary": summary, "findings": findings, "claims": claims}
 
         return await _run_agent(ctx, self, _inner)
@@ -148,7 +162,7 @@ class TechnicalAnalysisAgent(BaseAgent):
                 claims.append(claim.claim_id)
 
             stats = tech.get("statistics", {})
-            summary = await generate_section(ctx.llm, "Interpret the technical indicators. Explain each signal briefly in neutral language. State that these are historical observations, not predictions.", {"signals": tech.get("signals"), "statistics": stats, "latest": tech.get("latest")})
+            summary = await _summarize(ctx, "Interpret the technical indicators. Explain each signal briefly in neutral language. State that these are historical observations, not predictions.", {"signals": tech.get("signals"), "statistics": stats, "latest": tech.get("latest")})
             return {"summary": summary, "findings": findings, "claims": claims}
 
         return await _run_agent(ctx, self, _inner)
@@ -198,7 +212,7 @@ class FundamentalAnalysisAgent(BaseAgent):
                     state.add_claim(claim)
                     claims.append(claim.claim_id)
 
-            summary = await generate_section(ctx.llm, "Summarize the company fundamentals from SEC filings data: revenue, earnings, margins, leverage, growth. Report each metric with its fiscal period. If metrics are missing, say so.", {"latest": latest, "trend_years": derived.get("available_years")})
+            summary = await _summarize(ctx, "Summarize the company fundamentals from SEC filings data: revenue, earnings, margins, leverage, growth. Report each metric with its fiscal period. If metrics are missing, say so.", {"latest": latest, "trend_years": derived.get("available_years")})
             return {"summary": summary, "findings": findings, "claims": claims}
 
         return await _run_agent(ctx, self, _inner)
@@ -252,7 +266,7 @@ class NewsIntelligenceAgent(BaseAgent):
                     claim = make_claim(f"Verified event: {event['description']}", [ev], origin="event_detection")
                     state.add_claim(claim)
 
-            summary = await generate_section(ctx.llm, "Summarize recent news for this company: key themes, notable events, and aggregate sentiment. Cite article titles and sources. Note that sentiment is an analytical signal, not a return predictor.", {"articles": [{"title": a["title"], "source": a["source"], "published": a["published_at"], "sentiment": a["sentiment_label"]} for a in analyzed[:10]], "aggregate_sentiment": {"label": agg["aggregate_label"], "score": agg["aggregate_score"]}, "events": events})
+            summary = await _summarize(ctx, "Summarize recent news for this company: key themes, notable events, and aggregate sentiment. Cite article titles and sources. Note that sentiment is an analytical signal, not a return predictor.", {"articles": [{"title": a["title"], "source": a["source"], "published": a["published_at"], "sentiment": a["sentiment_label"]} for a in analyzed[:10]], "aggregate_sentiment": {"label": agg["aggregate_label"], "score": agg["aggregate_score"]}, "events": events})
             return {"summary": summary, "findings": findings, "claims": claims, "events": events}
 
         return await _run_agent(ctx, self, _inner)
@@ -350,7 +364,7 @@ class RiskAgent(BaseAgent):
             risks.append({"category": "Model Risk", "risk": "Sentiment lexicon and event detection are heuristic; technical indicators are descriptive, not predictive", "severity": "low", "evidence": "platform methodology (see docs)", "basis": "methodology"})
 
             state.risks = risks
-            summary = await generate_section(ctx.llm, "Summarize the identified risks with their evidence. Use neutral language. Only reference the listed risks — do not invent new ones.", {"risks": risks})
+            summary = await _summarize(ctx, "Summarize the identified risks with their evidence. Use neutral language. Only reference the listed risks — do not invent new ones.", {"risks": risks})
             return {"summary": summary, "findings": risks, "claims": []}
 
         return await _run_agent(ctx, self, _inner)
@@ -461,7 +475,7 @@ class ResearchSynthesizerAgent(BaseAgent):
                 "news_summary": state.agent_results.get("news_intelligence", {}).get("summary", "")[:600],
                 "top_risks": [r["risk"][:160] for r in state.risks[:5]],
             }
-            exec_summary = await generate_section(ctx.llm, "Write a 4-6 sentence executive summary of this company's situation based strictly on the supported claims and agent summaries. Neutral research language only. No advice, no predictions.", exec_data)
+            exec_summary = await _summarize(ctx, "Write a 4-6 sentence executive summary of this company's situation based strictly on the supported claims and agent summaries. Neutral research language only. No advice, no predictions.", exec_data)
 
             state.report = {
                 "executive_summary": exec_summary,

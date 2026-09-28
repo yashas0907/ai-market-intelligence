@@ -60,6 +60,9 @@ app.include_router(stream_router, prefix=API, tags=["realtime"])
 @app.on_event("startup")
 async def startup() -> None:
     await init_db()
+    from app.services.refresher import start_refresher
+
+    start_refresher()
     # Warm the SEC ticker-map cache so the first user search is fast.
     try:
         from app.data.collectors import cached
