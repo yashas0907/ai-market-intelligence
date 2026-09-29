@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.core.config import get_settings
+from app.core.db import db_write_lock
 from app.core.observability import logger, obs
 from app.data.sources.clients import (
     GoogleNewsRssClient,
@@ -78,6 +79,9 @@ async def upsert_company(session, symbol: str, name: str, exchange: str | None =
         company.cik = cik or company.cik
         company.updated_at = datetime.now(timezone.utc)
     await session.flush()
+    # COMMIT immediately: an uncommitted INSERT holds the SQLite write lock across
+    # await boundaries (network fetches, lock release) — blocking every other writer.
+    await session.commit()
     return company
 
 
@@ -220,23 +224,23 @@ async def resolve_company_profile(session, symbol: str) -> dict[str, Any]:
                 profile["industry"] = sic_desc
                 profile["sector"] = _sic_division_to_sector(subs.get("sic"))
             profile["category"] = subs.get("category")
-            profile["category"] = subs.get("category")
             profile["fiscal_year_end"] = subs.get("fiscalYearEnd")
             profile["description"] = subs.get("description")
             profile["sources"].append("SEC submissions API")
         except Exception as exc:
             logger.warning("collector.profile_sec_fail", symbol=symbol, error=str(exc)[:150])
 
-    await upsert_company(
-        session,
-        symbol=profile["symbol"],
-        name=profile["name"],
-        exchange=profile["exchange"],
-        sector=profile.get("sector"),
-        industry=profile.get("industry"),
-        country=profile.get("country"),
-        cik=profile.get("cik"),
-    )
+    async with db_write_lock:
+        await upsert_company(
+            session,
+            symbol=profile["symbol"],
+            name=profile["name"],
+            exchange=profile["exchange"],
+            sector=profile.get("sector"),
+            industry=profile.get("industry"),
+            country=profile.get("country"),
+            cik=profile.get("cik"),
+        )
     profile["retrieved_at"] = datetime.now(timezone.utc)
     return profile
 
@@ -252,27 +256,29 @@ async def collect_market_data(session, symbol: str, range_: str = "1y") -> dict[
         # re-run on every request).
         return hit
     chart = await _yahoo_market.get_chart(symbol, range_)
-    company = await get_company_by_symbol(session, symbol)
-    if company is None:
-        company = await upsert_company(session, symbol=symbol, name=symbol)
+    async with db_write_lock:
+        company = await get_company_by_symbol(session, symbol)
+        if company is None:
+            company = await upsert_company(session, symbol=symbol, name=symbol)
 
-    rows_written = 0
-    seen_ts: set[datetime] = set()
-    for p in chart["points"]:
-        if p.ts in seen_ts:
-            obs.incr("pipeline_duplicate_skipped", source="yahoo")
-            continue
-        seen_ts.add(p.ts)
-        stmt = (
-            sqlite_insert(MarketData)
-            .values(company_id=company.id, ts=p.ts, frequency="1d", open=p.open, high=p.high, low=p.low, close=p.close, adjclose=p.adjclose, volume=p.volume, source="yahoo", retrieved_at=datetime.now(timezone.utc))
-            .on_conflict_do_update(
-                index_elements=["company_id", "ts", "frequency"],
-                set_={"open": p.open, "high": p.high, "low": p.low, "close": p.close, "adjclose": p.adjclose, "volume": p.volume, "retrieved_at": datetime.now(timezone.utc)},
+        rows_written = 0
+        seen_ts: set[datetime] = set()
+        for p in chart["points"]:
+            if p.ts in seen_ts:
+                obs.incr("pipeline_duplicate_skipped", source="yahoo")
+                continue
+            seen_ts.add(p.ts)
+            stmt = (
+                sqlite_insert(MarketData)
+                .values(company_id=company.id, ts=p.ts, frequency="1d", open=p.open, high=p.high, low=p.low, close=p.close, adjclose=p.adjclose, volume=p.volume, source="yahoo", retrieved_at=datetime.now(timezone.utc))
+                .on_conflict_do_update(
+                    index_elements=["company_id", "ts", "frequency"],
+                    set_={"open": p.open, "high": p.high, "low": p.low, "close": p.close, "adjclose": p.adjclose, "volume": p.volume, "retrieved_at": datetime.now(timezone.utc)},
+                )
             )
-        )
-        await session.execute(stmt)
-        rows_written += 1
+            await session.execute(stmt)
+            rows_written += 1
+        await session.commit()
     logger.info("collector.market_data", symbol=symbol, rows=rows_written, range=range_)
     result = {"symbol": symbol, "points": chart["points"], "currency": chart.get("currency"), "exchange": chart.get("exchange"), "retrieved_at": chart["retrieved_at"], "rows_written": rows_written}
     cache_set(cache_key, result, s.cache_market_ttl)
@@ -343,7 +349,13 @@ async def collect_fundamentals(session, symbol: str) -> dict[str, Any]:
 
     company = await get_company_by_symbol(session, symbol)
     if company is None or not company.cik:
-        await resolve_company_profile(session, symbol)
+        # resolve the profile in a FRESH session: its writes commit immediately
+        # (upsert_company commits) and never sit uncommitted on this request's
+        # session across the heavy SEC companyfacts fetch (SQLite write-lock hazard)
+        from app.core.db import SessionLocal
+
+        async with SessionLocal() as fresh:
+            await resolve_company_profile(fresh, symbol)
         company = await get_company_by_symbol(session, symbol)
     if company is None or not company.cik:
         result = {"symbol": symbol, "metrics": [], "retrieved_at": datetime.now(timezone.utc), "error": "no SEC CIK available for this ticker"}
@@ -383,7 +395,8 @@ async def _bg_refresh_fundamentals(symbol: str) -> None:
 
 
 async def _fetch_and_store_fundamentals(session, symbol: str, company, s, cache_key: str) -> dict[str, Any]:
-    facts = await cached(f"sec:companyfacts:{company.cik}", s.cache_fundamentals_ttl, lambda: _sec.get_companyfacts(company.cik))
+    facts = await _sec.get_companyfacts(company.cik)
+    cache_set(f"sec:companyfacts:{company.cik}", facts, s.cache_fundamentals_ttl)
     us_gaap = (facts.get("facts") or {}).get("us-gaap") or {}
     metrics: list[dict[str, Any]] = []
     retrieved_at = datetime.now(timezone.utc)
@@ -423,25 +436,27 @@ async def _fetch_and_store_fundamentals(session, symbol: str, company, s, cache_
                     }
                 )
 
-    for m in metrics:
-        stmt = (
-            sqlite_insert(FundamentalMetric)
-            .values(
-                company_id=company.id,
-                metric_key=m["metric_key"],
-                period=m["period"],
-                fiscal_year=m["fiscal_year"],
-                value=m["value"],
-                unit=m["unit"],
-                source=m["source"],
-                retrieved_at=retrieved_at,
+    async with db_write_lock:
+        for m in metrics:
+            stmt = (
+                sqlite_insert(FundamentalMetric)
+                .values(
+                    company_id=company.id,
+                    metric_key=m["metric_key"],
+                    period=m["period"],
+                    fiscal_year=m["fiscal_year"],
+                    value=m["value"],
+                    unit=m["unit"],
+                    source=m["source"],
+                    retrieved_at=retrieved_at,
+                )
+                .on_conflict_do_update(
+                    index_elements=["company_id", "metric_key", "period"],
+                    set_={"value": m["value"], "unit": m["unit"], "fiscal_year": m["fiscal_year"], "retrieved_at": retrieved_at},
+                )
             )
-            .on_conflict_do_update(
-                index_elements=["company_id", "metric_key", "period"],
-                set_={"value": m["value"], "unit": m["unit"], "fiscal_year": m["fiscal_year"], "retrieved_at": retrieved_at},
-            )
-        )
-        await session.execute(stmt)
+            await session.execute(stmt)
+        await session.commit()
 
     logger.info("collector.fundamentals", symbol=symbol, metrics=len(metrics))
     result = {"symbol": symbol, "metrics": metrics, "retrieved_at": retrieved_at, "error": None}
@@ -461,38 +476,39 @@ async def collect_news(session, symbol: str, company_name: str, limit: int | Non
         return hit
 
     feed = await _news.fetch_feed(symbol, company_name, limit)
+    async with db_write_lock:
+        company = await get_company_by_symbol(session, symbol)
+        if company is None:
+            company = await upsert_company(session, symbol=symbol, name=company_name or symbol)
 
-    company = await get_company_by_symbol(session, symbol)
-    if company is None:
-        company = await upsert_company(session, symbol=symbol, name=company_name or symbol)
-
-    stored: list[dict[str, Any]] = []
-    seen_urls: set[str] = set()
-    for item in feed:
-        h = url_hash(item["url"])
-        if h in seen_urls:
-            continue
-        seen_urls.add(h)
-        published = item.get("published_at") or datetime.now(timezone.utc)
-        stmt = (
-            sqlite_insert(NewsArticle)
-            .values(
-                company_id=company.id,
-                url_hash=h,
-                title=item["title"],
-                source=item["source"],
-                url=item["url"],
-                published_at=published,
-                retrieved_at=item.get("retrieved_at") or datetime.now(timezone.utc),
-                summary=item.get("summary", ""),
+        stored: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for item in feed:
+            h = url_hash(item["url"])
+            if h in seen_urls:
+                continue
+            seen_urls.add(h)
+            published = item.get("published_at") or datetime.now(timezone.utc)
+            stmt = (
+                sqlite_insert(NewsArticle)
+                .values(
+                    company_id=company.id,
+                    url_hash=h,
+                    title=item["title"],
+                    source=item["source"],
+                    url=item["url"],
+                    published_at=published,
+                    retrieved_at=item.get("retrieved_at") or datetime.now(timezone.utc),
+                    summary=item.get("summary", ""),
+                )
+                .on_conflict_do_update(
+                    index_elements=["company_id", "url_hash"],
+                    set_={"title": item["title"], "summary": item.get("summary", ""), "retrieved_at": datetime.now(timezone.utc)},
+                )
             )
-            .on_conflict_do_update(
-                index_elements=["company_id", "url_hash"],
-                set_={"title": item["title"], "summary": item.get("summary", ""), "retrieved_at": datetime.now(timezone.utc)},
-            )
-        )
-        await session.execute(stmt)
-        stored.append({**item, "published_at": published, "article_id": h})
+            await session.execute(stmt)
+            stored.append({**item, "published_at": published, "article_id": h})
+        await session.commit()
 
     logger.info("collector.news", symbol=symbol, articles=len(stored))
     result = {"symbol": symbol, "articles": stored, "retrieved_at": datetime.now(timezone.utc)}

@@ -225,41 +225,47 @@ class Orchestrator:
         return report
 
     async def _update_session(self, db_row: ResearchSession, **kwargs) -> None:
-        for k, v in kwargs.items():
-            setattr(db_row, k, v)
-        await self.session.commit()
+        from app.core.db import db_write_lock
+
+        async with db_write_lock:
+            for k, v in kwargs.items():
+                setattr(db_row, k, v)
+            await self.session.commit()
 
     async def _persist(self, db_row: ResearchSession, state: WorkflowState, report: dict[str, Any], duration_ms: int, completed_at: datetime) -> None:
-        self.session.add(ResearchReportDB(session_id=db_row.id, report_json=report))
-        for name, result in state.agent_results.items():
-            self.session.add(
-                AgentRun(
-                    session_id=db_row.id,
-                    agent_name=name,
-                    status=result.get("status", "unknown"),
-                    summary=(result.get("summary") or "")[:2000],
-                    claims_json=result.get("claims", []),
-                    evidence_ids=[eid for eid in state.evidence.keys()][:50],
-                    error=result.get("error"),
-                    duration_ms=result.get("duration_ms", 0),
-                )
-            )
-        for claim in state.claims.values():
-            for ev in state.evidence_for_claim(claim.claim_id):
+        from app.core.db import db_write_lock
+
+        async with db_write_lock:
+            self.session.add(ResearchReportDB(session_id=db_row.id, report_json=report))
+            for name, result in state.agent_results.items():
                 self.session.add(
-                    EvidenceRecord(
-                        evidence_id=ev.evidence_id,
+                    AgentRun(
                         session_id=db_row.id,
-                        claim_id=claim.claim_id,
-                        source_id=ev.source.source_id,
-                        source_name=ev.source.name,
-                        source_kind=ev.source.kind,
-                        source_url=ev.source.url,
-                        retrieved_at=ev.source.retrieved_at,
-                        payload={"label": ev.payload.label, "value": ev.payload.value, "unit": ev.payload.unit, "extra": ev.payload.extra},
-                        claim_statement=claim.statement,
-                        verification=claim.verification,
-                        confidence=ev.confidence,
+                        agent_name=name,
+                        status=result.get("status", "unknown"),
+                        summary=(result.get("summary") or "")[:2000],
+                        claims_json=result.get("claims", []),
+                        evidence_ids=[eid for eid in state.evidence.keys()][:50],
+                        error=result.get("error"),
+                        duration_ms=result.get("duration_ms", 0),
                     )
                 )
-        await self.session.commit()
+            for claim in state.claims.values():
+                for ev in state.evidence_for_claim(claim.claim_id):
+                    self.session.add(
+                        EvidenceRecord(
+                            evidence_id=ev.evidence_id,
+                            session_id=db_row.id,
+                            claim_id=claim.claim_id,
+                            source_id=ev.source.source_id,
+                            source_name=ev.source.name,
+                            source_kind=ev.source.kind,
+                            source_url=ev.source.url,
+                            retrieved_at=ev.source.retrieved_at,
+                            payload={"label": ev.payload.label, "value": ev.payload.value, "unit": ev.payload.unit, "extra": ev.payload.extra},
+                            claim_statement=claim.statement,
+                            verification=claim.verification,
+                            confidence=ev.confidence,
+                        )
+                    )
+            await self.session.commit()
