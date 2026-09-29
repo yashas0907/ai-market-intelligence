@@ -1,6 +1,7 @@
 """API tests using httpx ASGI client with FAKE collectors (no network).
 Covers: company lookup, market, research, comparison, watchlist, security."""
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -222,6 +223,31 @@ async def test_upload_txt_ingests(app_with_fakes):
         r2 = await c.get("/api/documents/search?q=revenue+margins&company_symbol=TEST")
         assert r2.status_code == 200
         assert len(r2.json()["results"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_quote_stream_emits_quote_event():
+    """Unit test: exercise the SSE generator directly (ASGITransport buffers
+    infinite streams, so streaming through the app fixture would hang)."""
+    from app.api.stream import stream_quote
+
+    fake_quote = {
+        "symbol": "TEST", "price": 123.45, "change_pct": 1.2, "currency": "USD",
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "note": "delayed",
+    }
+    with patch("app.data.collectors.get_live_quote", new=AsyncMock(return_value=fake_quote)):
+        response = await stream_quote("TEST")
+        assert response.media_type == "text/event-stream"
+        got_quote = False
+        async for chunk in response.body_iterator:
+            text = chunk.decode() if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+            if "event: quote" in text and "data:" in text:
+                data = json.loads(text.split("data:", 1)[1].strip())
+                assert data["price"] == 123.45
+                got_quote = True
+                break
 
 
 @pytest.mark.asyncio

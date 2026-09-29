@@ -5,6 +5,10 @@ export function researchStreamUrl(jobId) {
   return `${BASE}/research/${jobId}/stream`
 }
 
+export function quoteStreamUrl(symbol) {
+  return `${BASE}/company/${encodeURIComponent(symbol)}/quote/stream`
+}
+
 function f(url, opts = {}) {
   return window.fetch(url, { ...opts, signal: AbortSignal.timeout(TIMEOUT_MS) })
 }

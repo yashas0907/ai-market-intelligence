@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   searchCompanies, getCompany, getMarket, getTechnical, getFundamentals,
-  getNews, startResearch, getResearch, addToWatchlist, getQuote, researchStreamUrl
+  getNews, startResearch, getResearch, addToWatchlist, getQuote, researchStreamUrl, quoteStreamUrl
 } from '../api.js'
 import {
   fmt, pct, timeAgo, utcStamp, SentimentBadge, SeverityBadge,
@@ -77,13 +77,34 @@ export default function Dashboard() {
     one('news', getNews)(sym).then(n => n && setNews(n))
   }
 
-  // live quote ticker: 60s auto-refresh while a symbol is selected (honestly labeled)
+  // live quote ticker: SSE push (30s) with polling fallback — honestly labeled
   useEffect(() => {
     if (!symbol) { setQuote(null); return }
     const refresh = () => getQuote(symbol).then(q => q && setQuote(q)).catch(() => {})
     refresh()
-    quoteRef.current = setInterval(refresh, 60000)
-    return () => clearInterval(quoteRef.current)
+    let es = null
+    try {
+      es = new EventSource(quoteStreamUrl(symbol))
+      esRef.current = es
+      es.addEventListener('quote', (ev) => {
+        const q = JSON.parse(ev.data)
+        if (q && q.price != null) setQuote(q)
+      })
+      es.addEventListener('error', () => {
+        es.close(); esRef.current = null
+        if (!quoteRef.current) {
+          quoteRef.current = setInterval(refresh, 60000)
+        }
+      })
+    } catch {
+      quoteRef.current = setInterval(refresh, 60000)
+    }
+    return () => {
+      if (es) es.close()
+      esRef.current = null
+      clearInterval(quoteRef.current)
+      quoteRef.current = null
+    }
   }, [symbol])
 
   // deep-link support: /?s=SYMBOL (used by watchlist links)
