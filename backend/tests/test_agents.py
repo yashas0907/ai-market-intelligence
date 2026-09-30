@@ -1,6 +1,7 @@
 """Agent/workflow tests with FAKE source clients (no network). Verifies:
 state transitions, claim/evidence wiring, fact-checker behavior, failure recovery."""
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -166,6 +167,54 @@ class TestSynthesizer:
         ctx = FakeCtx(state, llm=CountingLLM())
         await ResearchSynthesizerAgent().run(ctx)
         assert len(calls) <= 1, f"quick depth made {len(calls)} LLM calls (should be <=1)"
+
+
+class TestReportContract:
+    """The composed report must be self-contained: every spec section present."""
+
+    def _make_state(self):
+        state = WorkflowState(symbol="TEST", company_name="Test Co")
+        state.profile = {"symbol": "TEST", "name": "Test Co", "sector": "Tech", "cik": "0001234567", "sources": ["SEC"]}
+        state.market = {"points": [{"ts": "2026-01-01", "close": 100.0, "volume": 1e6}], "avg_daily_volume": 1_000_000, "currency": "USD"}
+        state.technical = {"signals": [{"indicator": "rsi14", "reading": "neutral-zone", "note": "RSI 55"}], "statistics": {"annualized_volatility_pct": 25.0}, "latest": {"rsi14": 55.0}, "series": {"close": [100.0]}}
+        state.fundamentals = {"derived": {"latest": {"revenue": {"value": 500.0, "period": "2025-12-31"}}, "trend": {"revenue": [{"year": 2025, "value": 500.0}]}, "available_years": [2025]}}
+        state.news = [{"title": "t", "source": "s", "url": "http://x", "published_at": "2026-01-01", "sentiment_label": "positive", "sentiment_score": 0.5}]
+        state.sentiment = {"aggregate_label": "positive", "aggregate_score": 0.5, "article_count": 1, "distribution": {"positive": 1, "neutral": 0, "negative": 0}, "trend": [], "note": "n"}
+        state.events = [{"event_type": "earnings", "description": "Q3 earnings beat", "verification": "verified", "source": "Reuters", "url": "http://x", "date": "2026-01-01"}]
+        state.agent_results = {"market_data": {"status": "ok", "summary": "market summary", "duration_ms": 5}}
+        state.risks = [{"category": "Market Risk", "risk": "elevated vol", "severity": "medium", "evidence": "computed", "basis": "computed"}]
+        state.data_freshness = [{"source": "Yahoo", "retrieved_at": "2026-01-01T00:00:00Z"}]
+        return state
+
+    def _compose(self, state):
+        from app.workflows.orchestrator import Orchestrator
+
+        return Orchestrator._compose_report(Orchestrator.__new__(Orchestrator), state)
+
+    def test_all_spec_sections_present(self):
+        report = self._compose(self._make_state())
+        required = [
+            "report_id", "symbol", "company_name", "generated_at",
+            "executive_summary", "company_overview", "market_performance",
+            "technical_analysis", "fundamental_analysis", "news_intelligence",
+            "sentiment_section", "events", "risks", "bull_case", "bear_case",
+            "key_unknowns", "contradictions", "claims", "sources", "disclaimer",
+        ]
+        missing = [k for k in required if k not in report]
+        assert not missing, f"report missing sections: {missing}"
+
+    def test_no_advice_language_in_report(self):
+        report = self._compose(self._make_state())
+        banned = ["buy this stock", "sell now", "guaranteed return", "guaranteed profit", "you should buy", "you should sell", "will definitely rise", "will definitely fall"]
+        blob = json.dumps(report).lower()
+        for phrase in banned:
+            assert phrase not in blob, f"advice language found: '{phrase}'"
+        assert "NOT FINANCIAL ADVICE" in report["disclaimer"]
+
+    def test_events_carry_verification_flag(self):
+        report = self._compose(self._make_state())
+        for e in report["news_intelligence"]["events"]:
+            assert "verification" in e, "event missing verified/inferred classification"
 
 
 class TestEventDetection:

@@ -190,6 +190,7 @@ class Orchestrator:
                 "events": state.events,
             },
             "sentiment_section": state.sentiment,
+            "events": state.events,
             "risks": state.risks,
             "bull_case": state.bull_case,
             "bear_case": state.bear_case,

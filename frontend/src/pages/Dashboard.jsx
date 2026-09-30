@@ -569,6 +569,12 @@ function ProgressTrace({ status }) {
 
 function ReportView({ report }) {
   const [showClaims, setShowClaims] = useState(false)
+  const co = report.company_overview || {}
+  const mp = report.market_performance || {}
+  const ta = report.technical_analysis || {}
+  const fa = report.fundamental_analysis || {}
+  const ni = report.news_intelligence || {}
+  const se = report.sentiment_section || {}
   return (
     <div className="report fade-in">
       <div className="panel">
@@ -576,6 +582,76 @@ function ReportView({ report }) {
         <div className="freshness">generated {utcStamp(report.generated_at)}</div>
         <h2>Executive Summary</h2>
         <p>{report.executive_summary}</p>
+      </div>
+
+      <div className="grid grid-2">
+        <div className="panel">
+          <h3>COMPANY OVERVIEW</h3>
+          <div style={{ lineHeight: 1.9 }}>
+            <div><span className="freshness">name:</span> {co.name || '—'}</div>
+            <div><span className="freshness">symbol:</span> {co.symbol || '—'}</div>
+            <div><span className="freshness">sector:</span> {co.sector || '—'}</div>
+            <div><span className="freshness">industry:</span> {co.industry || '—'}</div>
+            <div><span className="freshness">exchange:</span> {co.exchange || '—'}</div>
+            {co.cik && <div><span className="freshness">SEC CIK:</span> <a href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${co.cik}`} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{co.cik}</a></div>}
+            {(co.profile_sources || []).map((s, i) => <div key={i} className="freshness">source: {s}</div>)}
+          </div>
+        </div>
+        <div className="panel">
+          <h3>MARKET PERFORMANCE</h3>
+          <p style={{ lineHeight: 1.7 }}>{mp.summary || 'Market data unavailable for this run.'}</p>
+          <div className="freshness" style={{ marginTop: 8 }}>
+            {mp.period_days ? `${mp.period_days} trading days` : ''}{mp.currency ? ` · currency ${mp.currency}` : ''}{mp.avg_daily_volume ? ` · avg volume ${mp.avg_daily_volume.toLocaleString()}` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>TECHNICAL ANALYSIS <span className="freshness">(historical observations — not predictions)</span></h3>
+        <p style={{ lineHeight: 1.7 }}>{ta.summary || 'Technical data unavailable for this run.'}</p>
+        {(ta.signals || []).slice(0, 6).map((s, i) => (
+          <div key={i} className="claim"><span className="stmt">{s.indicator}: {s.reading}</span><div className="ev">{s.note}</div></div>
+        ))}
+      </div>
+
+      <div className="panel">
+        <h3>FUNDAMENTAL ANALYSIS <span className="freshness">(SEC 10-K facts with fiscal periods)</span></h3>
+        <p style={{ lineHeight: 1.7 }}>{fa.summary || 'Fundamental data unavailable for this run.'}</p>
+        {fa.trend?.revenue?.length > 1 && (
+          <div className="freshness" style={{ marginTop: 8 }}>
+            Revenue trend (FY): {fa.trend.revenue.slice(-5).map(t => `${t.year}: ${(t.value / 1e9).toFixed(1)}B`).join(' · ')}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-2">
+        <div className="panel">
+          <h3>NEWS INTELLIGENCE <span className="freshness">({(ni.articles || []).length} articles)</span></h3>
+          <p style={{ lineHeight: 1.7 }}>{ni.summary || 'News unavailable for this run.'}</p>
+          {(ni.articles || []).slice(0, 5).map((a, i) => (
+            <div key={i} className="article">
+              <div className="title"><a href={a.url} target="_blank" rel="noreferrer">{a.title}</a></div>
+              <div className="meta">{a.source} · {timeAgo(a.published_at)} · <SentimentBadge label={a.sentiment} /></div>
+            </div>
+          ))}
+        </div>
+        <div className="panel">
+          <h3>SENTIMENT <span className="freshness">(analytical signal with limitations)</span></h3>
+          {se.aggregate_label && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0' }}>
+              <SentimentBadge label={se.aggregate_label} />
+              <span className="freshness">mean score {se.aggregate_score} · {se.article_count} articles</span>
+            </div>
+          )}
+          {se.distribution && (
+            <div style={{ display: 'flex', gap: 12, marginTop: 8 }} className="freshness">
+              <span className="pos">● {se.distribution.positive} positive</span>
+              <span>● {se.distribution.neutral} neutral</span>
+              <span className="neg">● {se.distribution.negative} negative</span>
+            </div>
+          )}
+          {se.note && <div className="freshness" style={{ marginTop: 10 }}>{se.note}</div>}
+        </div>
       </div>
 
       <div className="grid grid-2">
