@@ -89,6 +89,7 @@ Measured (5y daily): AAPL GBM test acc 0.405 (majority baseline 0.522 — report
 GET  /api/companies/search?q=          company search (SEC map + Yahoo fallback)
 GET  /api/company/{symbol}             profile (name, sector, CIK, sources)
 GET  /api/company/{symbol}/quote       live quote (60s cache; delayed ≤15 min — stamped)
+GET  /api/company/{symbol}/quote/stream  REAL-TIME quote pushes via Server-Sent Events (30s)
 GET  /api/company/{symbol}/market      daily OHLCV + retrieval time
 GET  /api/company/{symbol}/fundamentals  SEC XBRL metrics + derived ratios
 GET  /api/company/{symbol}/news        articles + sentiment (metadata only)
