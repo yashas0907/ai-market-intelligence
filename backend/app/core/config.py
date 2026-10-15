@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     research_dedup_ttl: int = 3600
     research_concurrency: int = 4
 
-    rate_limit_per_minute: int = 60
+    rate_limit_per_minute: int = 120
 
     log_level: str = "INFO"
 
